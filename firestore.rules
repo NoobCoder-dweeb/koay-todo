@@ -1,0 +1,138 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isMember(familyId) {
+      return signedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid))
+          .data.familyId == familyId
+        && get(/databases/$(database)/documents/families/$(familyId))
+          .data.memberIds.hasAny([request.auth.uid]);
+    }
+
+    function isInvitedTo(familyId) {
+      return signedIn()
+        && get(/databases/$(database)/documents/invites/$(resource.data.inviteCode))
+          .data.familyId == familyId;
+    }
+
+    function validTodo(familyId, todoId) {
+      return request.resource.data.keys().hasOnly([
+          'id', 'title', 'completed', 'assigneeId', 'createdAt',
+          'updatedAt', 'revision', 'updatedBy', 'deletedAt'
+        ])
+        && request.resource.data.id == todoId
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 120
+        && request.resource.data.completed is bool
+        && request.resource.data.createdAt is int
+        && request.resource.data.updatedAt is timestamp
+        && request.resource.data.revision is int
+        && (
+          request.resource.data.deletedAt == null
+          || request.resource.data.deletedAt is int
+        )
+        && (
+          request.resource.data.assigneeId == null
+          || get(/databases/$(database)/documents/families/$(familyId))
+            .data.memberIds.hasAny([request.resource.data.assigneeId])
+        )
+        && request.resource.data.updatedBy == request.auth.uid;
+    }
+
+    match /users/{userId} {
+      allow get: if signedIn() && request.auth.uid == userId;
+      allow list: if false;
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['familyId', 'displayName'])
+        && request.resource.data.familyId == null;
+      allow update: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['familyId', 'displayName'])
+        && (
+          request.resource.data.familyId == resource.data.familyId
+          || (
+            resource.data.familyId == null
+            && request.resource.data.familyId is string
+            && getAfter(
+              /databases/$(database)/documents/families/$(request.resource.data.familyId)
+            ).data.memberIds.hasAny([userId])
+          )
+        );
+      allow delete: if false;
+    }
+
+    match /invites/{inviteCode} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['familyId', 'createdAt'])
+        && request.resource.data.createdAt is int
+        && getAfter(
+          /databases/$(database)/documents/families/$(request.resource.data.familyId)
+        ).data.inviteCode == inviteCode
+        && getAfter(
+          /databases/$(database)/documents/families/$(request.resource.data.familyId)
+        ).data.memberIds.hasAny([request.auth.uid]);
+      allow update, delete: if false;
+    }
+
+    match /families/{familyId} {
+      allow get: if isMember(familyId) || isInvitedTo(familyId);
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly([
+          'name', 'createdAt', 'inviteCode', 'memberIds', 'memberNames'
+        ])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 60
+        && request.resource.data.createdAt is int
+        && request.resource.data.memberIds == [request.auth.uid]
+        && request.resource.data.memberNames.keys().hasOnly([request.auth.uid])
+        && request.resource.data.inviteCode is string
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid))
+          .data.familyId == familyId
+        && getAfter(
+          /databases/$(database)/documents/invites/$(request.resource.data.inviteCode)
+        ).data.familyId == familyId;
+      allow update: if signedIn()
+        && !resource.data.memberIds.hasAny([request.auth.uid])
+        && resource.data.memberIds.size() < 5
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['memberIds', 'memberNames'])
+        && request.resource.data.memberIds.hasAll(resource.data.memberIds)
+        && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1
+        && request.resource.data.memberIds.hasAny([request.auth.uid])
+        && request.resource.data.memberNames.keys().hasAll(resource.data.memberNames.keys())
+        && request.resource.data.memberNames.keys().size()
+          == resource.data.memberNames.keys().size() + 1
+        && request.resource.data.memberNames.keys().hasAny([request.auth.uid])
+        && request.resource.data.memberNames[request.auth.uid] is string
+        && resource.data.inviteCode is string
+        && get(/databases/$(database)/documents/invites/$(resource.data.inviteCode))
+          .data.familyId == familyId
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid))
+          .data.familyId == familyId;
+      allow delete: if false;
+
+      match /todos/{todoId} {
+        allow read: if isMember(familyId);
+        allow create: if isMember(familyId)
+          && validTodo(familyId, todoId)
+          && request.resource.data.revision == 1;
+        allow update: if isMember(familyId)
+          && validTodo(familyId, todoId)
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.revision == resource.data.revision + 1;
+        allow delete: if false;
+      }
+    }
+  }
+}

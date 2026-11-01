@@ -1,15 +1,18 @@
 {
   "expo": {
-    "name": "koay-todo-expo-seed-647c0b84",
-    "slug": "koay-todo-expo-seed-647c0b84",
+    "name": "Family Todo",
+    "slug": "family-todo",
     "version": "1.0.0",
     "orientation": "portrait",
+    "scheme": "familytodo",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
+      "bundleIdentifier": "com.koay.familytodo",
       "supportsTablet": true
     },
     "android": {
+      "package": "com.koay.familytodo",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -18,8 +21,9 @@
       },
       "predictiveBackGestureEnabled": false
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    }
+    "plugins": [
+      "expo-web-browser",
+      "expo-apple-authentication"
+    ]
   }
 }
