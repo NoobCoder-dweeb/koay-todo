@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AppleAuthenticationButton,
   AppleAuthenticationButtonStyle,
@@ -8,7 +8,6 @@ import {
   signInAsync,
 } from 'expo-apple-authentication';
 import * as Crypto from 'expo-crypto';
-import * as Google from 'expo-auth-session/providers/google';
 import {
   GoogleAuthProvider,
   OAuthProvider,
@@ -26,8 +25,42 @@ import {
 } from 'react-native';
 import { colors } from './theme';
 
+let googleSignInConfigured = false;
+
 function messageFrom(error: unknown): string {
   return error instanceof Error ? error.message : 'Sign-in failed. Please try again.';
+}
+
+async function signInWithGoogle(auth: Auth): Promise<void> {
+  let googleSignIn: typeof import('@react-native-google-signin/google-signin');
+  try {
+    googleSignIn = await import('@react-native-google-signin/google-signin');
+  } catch (error) {
+    throw new Error(
+      `Google Sign-In's native module could not load. Install the app's development build instead of Expo Go. ${messageFrom(error)}`,
+    );
+  }
+
+  if (!googleSignInConfigured) {
+    googleSignIn.GoogleSignin.configure({
+      webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+      iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+    });
+    googleSignInConfigured = true;
+  }
+
+  await googleSignIn.GoogleSignin.hasPlayServices({
+    showPlayServicesUpdateDialog: true,
+  });
+  const response = await googleSignIn.GoogleSignin.signIn();
+  if (response.type === 'cancelled') return;
+  if (!response.data.idToken) {
+    throw new Error('Google did not return an ID token. Check the Web OAuth client ID.');
+  }
+  await signInWithCredential(
+    auth,
+    GoogleAuthProvider.credential(response.data.idToken),
+  );
 }
 
 function GoogleSignInButton({
@@ -41,58 +74,22 @@ function GoogleSignInButton({
   setBusy: (busy: 'google' | 'apple' | null) => void;
   setError: (error: string | null) => void;
 }) {
-  const [request, response, promptGoogle] = Google.useIdTokenAuthRequest({
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
-    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
-  });
-  const processedToken = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (response?.type === 'error') {
-      setError(response.error?.message ?? 'Google sign-in failed');
-      setBusy(null);
-      return;
-    }
-    if (response?.type !== 'success') return;
-    const idToken = response.params.id_token;
-    if (!idToken || processedToken.current === idToken) {
-      if (!idToken) setError('Google did not return an ID token. Check your OAuth configuration.');
-      return;
-    }
-    processedToken.current = idToken;
-    setBusy('google');
-    setError(null);
-    signInWithCredential(auth, GoogleAuthProvider.credential(idToken))
-      .catch((signInError: unknown) => setError(messageFrom(signInError)))
-      .finally(() => setBusy(null));
-  }, [auth, response, setBusy, setError]);
-
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel="Continue with Google"
-      disabled={!request || busy}
+      disabled={busy}
       onPress={() => {
         setError(null);
         setBusy('google');
-        void promptGoogle()
-          .then((result) => {
-            if (result.type === 'error') {
-              setError(result.error?.message ?? 'Google sign-in failed');
-              setBusy(null);
-            } else if (result.type !== 'success') {
-              setBusy(null);
-            }
-          })
-          .catch((promptError: unknown) => {
-            setError(messageFrom(promptError));
-            setBusy(null);
-          });
+        void signInWithGoogle(auth)
+          .catch((signInError: unknown) => setError(messageFrom(signInError)))
+          .finally(() => setBusy(null));
       }}
       style={({ pressed }) => [
         styles.googleButton,
         pressed && styles.pressed,
-        (!request || busy) && styles.disabled,
+        busy && styles.disabled,
       ]}
     >
       {busy ? (
@@ -108,9 +105,12 @@ export function SignInScreen({ auth }: { auth: Auth }) {
   const [appleAvailable, setAppleAvailable] = useState(false);
   const [busy, setBusy] = useState<'google' | 'apple' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const webGoogleClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
   const googleConfigured =
-    (Platform.OS === 'ios' && Boolean(process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID)) ||
-    (Platform.OS === 'android' && Boolean(process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID));
+    Boolean(webGoogleClientId) &&
+    (Platform.OS === 'ios'
+      ? Boolean(process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID)
+      : Platform.OS === 'android');
 
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
@@ -181,6 +181,13 @@ export function SignInScreen({ auth }: { auth: Auth }) {
           />
         )}
 
+        {googleConfigured && (
+          <Text style={styles.hint}>
+            This Google sign-in button requires the app&apos;s development build; Expo Go does not
+            include its native module.
+          </Text>
+        )}
+
         {appleAvailable && (
           <AppleAuthenticationButton
             buttonType={AppleAuthenticationButtonType.CONTINUE}
@@ -191,9 +198,10 @@ export function SignInScreen({ auth }: { auth: Auth }) {
           />
         )}
 
-        {!googleConfigured && !appleAvailable && (
+        {!googleConfigured && (Platform.OS === 'ios' || Platform.OS === 'android') && (
           <Text style={styles.hint}>
-            Add your Google OAuth client IDs to the environment to enable Google sign-in.
+            Set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID and, on iOS, EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID in
+            .env to enable Google sign-in.
           </Text>
         )}
         {busy !== null && <ActivityIndicator color={colors.green} style={styles.loader} />}
