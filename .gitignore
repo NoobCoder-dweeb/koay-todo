@@ -13,6 +13,10 @@ expo-env.d.ts
 .kotlin/
 *.orig.*
 *.jks
+credentials.json
+eas.json
+google-services.json
+GoogleService-Info.plist
 *.p8
 *.p12
 *.key

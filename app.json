@@ -24,6 +24,11 @@
     "plugins": [
       "expo-web-browser",
       "expo-apple-authentication"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "7e886994-c13e-4281-8d93-01a3707c3d03"
+      }
+    }
   }
 }
